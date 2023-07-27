@@ -16,7 +16,8 @@ class BendingConvModule(nn.Module):
     
     def forward(self, x):
         x = self.w1(x)
-        x = F.relu(x)
+        #x = F.relu(x)
+        x = torch.sin(x)
         return self.w2(x)
     
 class BendingConvModule_XY(nn.Module):
@@ -26,7 +27,7 @@ class BendingConvModule_XY(nn.Module):
         self.input_size = input_size
         self.in_channels = n_channels
         self.out_channels = self.hid_channels = n_channels
-        self.w1 = nn.Conv2d(self.in_channels + 3, 
+        self.w1 = nn.Conv2d(self.in_channels + 2, 
                             self.hid_channels, 3, 
                             padding='same')
         self.w2 = nn.Conv2d(self.hid_channels,
@@ -77,10 +78,11 @@ class BendingConvModule_XY(nn.Module):
         siny = torch.tile(self.siny[None, None, ...],
                        (batch_size, 1, 1, 1))
         
-        inp = torch.cat((x, y, r, inp), dim=1)
+        inp = torch.cat((x, y, inp), dim=1)
         
         inp = self.w1(inp)
-        inp = F.relu(inp)
+        #inp = F.relu(inp)
+        inp = torch.sin(inp)
         return self.w2(inp)
 
 class BendingCPPN(nn.Module):

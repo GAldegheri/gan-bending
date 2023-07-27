@@ -29,7 +29,8 @@ class TextPrompt(nn.Module):
             T.GaussianBlur(5)
         ])
         
-    def forward(self, x, augment=True, return_mean=True):
+    def forward(self, x, noises=None, augment=True, return_mean=True,
+                diversity=False):
         """
         Take a batch of images (x), encode them with clip_model
         and score each with the prompt using Squared Great Circle Distance
