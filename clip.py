@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 import open_clip
+import numpy as np
 
 class TextPrompt(nn.Module):
     def __init__(self, prompt_text, device='cpu'):
@@ -29,7 +30,7 @@ class TextPrompt(nn.Module):
             T.GaussianBlur(5)
         ])
         
-    def forward(self, x, noises=None, augment=True, return_mean=True,
+    def forward(self, x, augment=True, return_mean=True,
                 diversity=False):
         """
         Take a batch of images (x), encode them with clip_model
@@ -42,6 +43,24 @@ class TextPrompt(nn.Module):
         input_normed = F.normalize(image_embeds.unsqueeze(1), dim=2)
         embed_normed = F.normalize(self.prompt_embed.unsqueeze(0), dim=2)
         dists = input_normed.sub(embed_normed).norm(dim=2).div(2).arcsin().pow(2).mul(2)
+        
+        if diversity:
+            batch_size = x.shape[0]
+            assert batch_size % 2 == 0
+            img_embeds1 = input_normed[np.arange(0, batch_size, 2), ...]
+            img_embeds2 = input_normed[np.arange(1, batch_size, 2), ...]
+            x1 = x[np.arange(0, batch_size, 2), 
+                   ...].reshape(batch_size//2, -1)
+            x2 = x[np.arange(1, batch_size, 2), 
+                    ...].reshape(batch_size//2, -1)
+            div_latents = img_embeds1.sub(img_embeds2).norm(dim=2).div(2).arcsin().pow(2).mul(2)
+            div_inputs = F.normalize(torch.mean(torch.abs(x1 - x2), axis=1), dim=0).reshape(-1, 1)
+            
+            diversities = div_latents#/div_inputs
+            if return_mean:
+                return dists.mean(), diversities.mean()
+            return dists, diversities
+        
         if return_mean:
             return dists.mean()
         return dists

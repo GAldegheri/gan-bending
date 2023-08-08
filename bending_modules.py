@@ -1,9 +1,40 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import functools
+import operator
+
+class BendingDiffSort(nn.Module):
+    def __init__(self, n_channels, input_size):
+        super(BendingDiffSort, self).__init__()
+        self.n_channels = n_channels
+        
+        self.feat_extractor = nn.Sequential(
+            nn.Conv2d(1, 32, 5),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 5),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2)
+        )
+        # Trick from https://datascience.stackexchange.com/questions/40906/determining-size-of-fc-layer-after-conv-layer-in-pytorch
+        num_feats_before_fcnn = functools.reduce(
+            operator.mul,
+            list(self.feat_extractor(
+                torch.rand(1, input_size, input_size)
+            ).shape)
+        )
+        
+        self.fc1 = nn.Linear(num_feats_before_fcnn, 64)
+        
+        
+    def forward(self, x):
+        
+        batch_size = x.shape[0]
+        x = self.c1(x)
 
 class BendingConvModule(nn.Module):
-    def __init__(self, n_channels):
+    def __init__(self, n_channels, act_fn='relu'):
         super(BendingConvModule, self).__init__()
         self.in_channels = self.out_channels = n_channels
         self.hid_channels = n_channels
@@ -13,11 +44,15 @@ class BendingConvModule(nn.Module):
         self.w2 = nn.Conv2d(self.hid_channels,
                             self.out_channels, 3,
                             padding='same')
+        
+        if act_fn == 'relu':    
+            self.act_fn = F.relu
+        elif act_fn == 'sin':
+            self.act_fn = torch.sin
     
     def forward(self, x):
         x = self.w1(x)
-        #x = F.relu(x)
-        x = torch.sin(x)
+        x = self.act_fn(x)
         return self.w2(x)
     
 class BendingConvModule_XY(nn.Module):
