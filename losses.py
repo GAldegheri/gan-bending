@@ -1,16 +1,9 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from infonce import InfoNCE
 
 def compute_diversity_loss(output_batch, noise_batch):
-    
-    # def SGCD(a, b):
-    #     # Squared Great Circle Distance
-    #     a = F.normalize(a, dim=1)
-    #     b = F.normalize(b, dim=1)
-    #     dists = a.sub(b).norm(dim=1).div(2).arcsin().pow(2).mul(2)
-        
-    #     return dists
     
     assert output_batch.shape[0] == noise_batch.shape[0] and \
         output_batch.shape[0] % 2 == 0
