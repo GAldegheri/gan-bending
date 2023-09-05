@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from infonce import InfoNCE
 
 def compute_diversity_loss(output_batch, noise_batch):
     

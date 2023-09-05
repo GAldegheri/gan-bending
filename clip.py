@@ -109,7 +109,7 @@ class TextPrompt(CLIP):
             div_latents = img_embeds1.sub(img_embeds2).norm(dim=2).div(2).arcsin().pow(2).mul(2)
             #div_inputs = F.normalize(torch.mean(torch.abs(x1 - x2), axis=1), dim=0).reshape(-1, 1)
             
-            diversities = div_latents#/div_inputs
+            diversities = 1./div_latents#/div_inputs
             if return_mean:
                 return dists.mean(), diversities.mean()
             return dists, diversities

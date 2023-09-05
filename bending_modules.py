@@ -3,17 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import functools
 import operator
+from diffsort import DiffSortNet
 
 class BendingDiffSort(nn.Module):
-    def __init__(self, n_channels, input_size):
+    def __init__(self, n_channels, input_size, steepness=50):
         super(BendingDiffSort, self).__init__()
-        self.n_channels = n_channels
+        self.in_channels = self.out_channels = n_channels
+        self.input_size = input_size
+        self.steepness = steepness
         
         self.feat_extractor = nn.Sequential(
-            nn.Conv2d(1, 32, 5),
+            nn.Conv2d(self.in_channels, 64, 3),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 5),
+            nn.Conv2d(64, 128, 3),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(128, 256, 3),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2)
         )
@@ -21,17 +27,40 @@ class BendingDiffSort(nn.Module):
         num_feats_before_fcnn = functools.reduce(
             operator.mul,
             list(self.feat_extractor(
-                torch.rand(1, input_size, input_size)
+                torch.rand(self.in_channels, input_size, input_size)
             ).shape)
         )
         
-        self.fc1 = nn.Linear(num_feats_before_fcnn, 64)
+        self.fc1 = nn.Linear(num_feats_before_fcnn, 
+                             self.in_channels)
+        self.output_sorter = DiffSortNet('bitonic', 
+                                         self.in_channels, 
+                                         steepness=self.steepness)
         
+    def to(self, device):
+        new_self = super(BendingDiffSort, self).to(device) 
+        new_self.output_sorter = DiffSortNet('bitonic', 
+                                         self.in_channels, 
+                                         steepness=self.steepness,
+                                         device=device)
+        
+        return new_self 
         
     def forward(self, x):
         
         batch_size = x.shape[0]
-        x = self.c1(x)
+        out = self.feat_extractor(x)
+        out = out.view(batch_size, -1)
+        out = self.fc1(out)
+        _, sort_mat = self.output_sorter(out)
+        
+        sorted_x = torch.bmm(x.reshape(batch_size, self.in_channels, -1).permute(0, 2, 1), 
+                             sort_mat).permute(0, 2, 1).reshape(batch_size, 
+                                               self.in_channels,
+                                               self.input_size,
+                                               self.input_size)
+        
+        return sorted_x
 
 class BendingConvModule(nn.Module):
     def __init__(self, n_channels, act_fn='relu'):
@@ -56,13 +85,18 @@ class BendingConvModule(nn.Module):
         return self.w2(x)
     
 class BendingConvModule_XY(nn.Module):
-    def __init__(self, n_channels, input_size, device='cuda'):
+    def __init__(self, n_channels, input_size, 
+                 act_fn='relu', use_rad=False,
+                 device='cuda'):
         super(BendingConvModule_XY, self).__init__()
         self.device = device
         self.input_size = input_size
         self.in_channels = n_channels
+        self.act_fn = act_fn
+        self.use_rad = use_rad
         self.out_channels = self.hid_channels = n_channels
-        self.w1 = nn.Conv2d(self.in_channels + 2, 
+        extra_chans = 3 if use_rad else 2
+        self.w1 = nn.Conv2d(self.in_channels + extra_chans, 
                             self.hid_channels, 3, 
                             padding='same')
         self.w2 = nn.Conv2d(self.hid_channels,
@@ -95,7 +129,7 @@ class BendingConvModule_XY(nn.Module):
         new_self.sinx = new_self.sinx.to(device)
         new_self.siny = new_self.siny.to(device)
         
-        return  new_self  
+        return new_self  
     
     def forward(self, inp):
         batch_size = inp.shape[0]
@@ -114,10 +148,14 @@ class BendingConvModule_XY(nn.Module):
                        (batch_size, 1, 1, 1))
         
         inp = torch.cat((x, y, inp), dim=1)
+        if self.use_rad:
+            inp = torch.cat((r, inp), dim=1)
         
         inp = self.w1(inp)
-        #inp = F.relu(inp)
-        inp = torch.sin(inp)
+        if self.act_fn == 'relu':
+            inp = F.relu(inp)
+        elif self.act_fn == 'sin':
+            inp = torch.sin(inp)
         return self.w2(inp)
 
 class BendingCPPN(nn.Module):
@@ -196,4 +234,9 @@ class BendingCPPN(nn.Module):
         new_self.y = new_self.y.to(device)
         new_self.r = new_self.r.to(device)
         
-        return  new_self  
+        return  new_self
+    
+if __name__ == "__main__":
+    bendiffsort = BendingDiffSort(3, 24)
+    x = torch.rand(16, 3, 24, 24)
+    y = bendiffsort(x)
