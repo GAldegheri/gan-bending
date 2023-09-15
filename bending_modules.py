@@ -4,7 +4,134 @@ import torch.nn.functional as F
 import functools
 import operator
 from diffsort import DiffSortNet
+import ipdb
 
+class ConcatenatedModules(nn.Module):
+    def __init__(self, modules):
+        super(ConcatenatedModules, self).__init__()
+        self.mod_list = nn.ModuleList(modules)
+        self.mods = nn.Sequential(*self.mod_list)
+        self.in_channels = modules[0].in_channels
+        self.out_channels = modules[-1].out_channels
+        
+    def to(self, device):
+        new_self = super(ConcatenatedModules, self).to(device)
+        for m in self.mod_list:
+            m.to(device)
+        new_self.mods = nn.Sequential(*self.mod_list)
+        
+        return new_self
+        
+    def forward(self, x):
+        return self.mods(x)
+    
+
+class BendingDiffSort_XY(nn.Module):
+    def __init__(self, n_channels, input_size, 
+                 perm_rows=True, perm_cols=True, steepness=50):
+        super(BendingDiffSort_XY, self).__init__()
+        self.in_channels = self.out_channels = n_channels
+        self.hid_channels = n_channels * 2
+        self.input_size = input_size
+        
+        if not perm_rows and not perm_cols:
+            raise ValueError('At least one of perm_rows and perm_cols needs to be true!')
+        self.perm_rows = perm_rows
+        self.perm_cols = perm_cols
+        
+        self.steepness = steepness
+        
+        self.feat_extractor = nn.Sequential(
+            nn.Conv2d(self.in_channels, self.hid_channels, 
+                      1, padding='same'),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(self.hid_channels, self.hid_channels, 
+                      1, padding='same'),
+            nn.ReLU(inplace=True)
+            )
+        
+        if self.perm_rows:
+            self.rowwise = nn.Conv1d(self.hid_channels * self.input_size,
+                                    1, 1)
+            
+            self.row_sorter = DiffSortNet('bitonic', 
+                                        self.input_size, 
+                                        steepness=self.steepness)
+        
+        
+        if self.perm_cols:
+            self.colwise = nn.Conv1d(self.hid_channels * self.input_size,
+                                    1, 1)
+            
+            self.col_sorter = DiffSortNet('bitonic',
+                                        self.input_size,
+                                        steepness=self.steepness)
+        
+    def to(self, device):
+        new_self = super(BendingDiffSort_XY, self).to(device) 
+        if self.perm_rows:
+            new_self.row_sorter = DiffSortNet('bitonic', 
+                                            self.input_size, 
+                                            steepness=self.steepness,
+                                            device=device)
+        if self.perm_cols:
+            new_self.col_sorter = DiffSortNet('bitonic',
+                                            self.input_size,
+                                            steepness=self.steepness,
+                                            device=device)
+        
+        return new_self 
+        
+    def forward(self, x):
+        
+        batch_size = x.shape[0]
+        
+        out = self.feat_extractor(x)
+        
+        if self.perm_rows:
+        
+            out_rows = out.permute(0, 2, 1, 3).reshape(batch_size, 
+                                                    self.input_size, 
+                                                    -1).permute(0, 2, 1)
+            
+            row_scores = self.rowwise(out_rows).flatten(1)
+            _, sort_row_mat = self.row_sorter(row_scores)
+            
+            # First sort rows
+            x = x.view(-1, self.input_size, self.input_size)
+            sort_row_mat = sort_row_mat.unsqueeze(1).repeat(
+                1, self.in_channels, 1, 1).view(
+                    -1, self.input_size, self.input_size
+                )
+            x = torch.bmm(sort_row_mat, x).view(batch_size, 
+                                                self.in_channels,
+                                                self.input_size,
+                                                self.input_size)
+            
+        if self.perm_cols:
+            
+            out_cols = out.permute(0, 3, 1, 2).reshape(batch_size,
+                                                    self.input_size, 
+                                                    -1).permute(0, 2, 1)
+        
+            col_scores = self.colwise(out_cols).flatten(1)
+            
+            
+            _, sort_col_mat = self.col_sorter(col_scores)
+            
+            x = x.permute(0, 1, 3, 2).view(-1, 
+                                        self.input_size, 
+                                        self.input_size)
+            sort_col_mat = sort_col_mat.unsqueeze(1).repeat(
+                1, self.in_channels, 1, 1).view(
+                    -1, self.input_size, self.input_size
+                )
+            x = torch.bmm(sort_col_mat, x).view(batch_size, 
+                                                self.in_channels,
+                                                self.input_size,
+                                                self.input_size)
+        
+        return x
 class BendingDiffSort(nn.Module):
     def __init__(self, n_channels, input_size, steepness=50):
         super(BendingDiffSort, self).__init__()
@@ -13,13 +140,13 @@ class BendingDiffSort(nn.Module):
         self.steepness = steepness
         
         self.feat_extractor = nn.Sequential(
-            nn.Conv2d(self.in_channels, 64, 3),
+            nn.Conv2d(self.in_channels, 64, 2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3),
+            nn.Conv2d(64, 128, 2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
-            nn.Conv2d(128, 256, 3),
+            nn.Conv2d(128, 256, 2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2)
         )
@@ -237,6 +364,17 @@ class BendingCPPN(nn.Module):
         return  new_self
     
 if __name__ == "__main__":
-    bendiffsort = BendingDiffSort(3, 24)
-    x = torch.rand(16, 3, 24, 24)
-    y = bendiffsort(x)
+    numchans = [1024, 1024, 512, 256, 128, 64, 6]
+    inputsizes = [8, 16, 32, 64, 128, 256, 512]
+
+    bending_idx = 1
+
+    bendingmod_clip = BendingConvModule(numchans[bending_idx],
+                                        act_fn='sin')
+    bendsorting_clip = BendingDiffSort_XY(numchans[bending_idx],
+                                    inputsizes[bending_idx])
+    combined_bendmodule = nn.Sequential(bendsorting_clip, bendingmod_clip)
+    
+    x = torch.randn(1, 1024, 16, 16)
+    
+    y = combined_bendmodule(x)

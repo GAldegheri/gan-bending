@@ -13,6 +13,7 @@ from huggan.pytorch.lightweight_gan.lightweight_gan import is_power_of_two, defa
     EMA, set_requires_grad, AugWrapper, LightweightGAN
 from einops import rearrange
 from collections import OrderedDict
+import ipdb
 
 
 class BendedGenerator(nn.Module):
@@ -124,7 +125,7 @@ class BendedGenerator(nn.Module):
             
         self.out_conv = nn.Conv2d(features[-1], init_channel, 3, padding=1)
 
-    def forward(self, x, bend=True, return_inout=False):
+    def forward(self, x, bend=True, return_inout=False, perm_h=None):
         x = rearrange(x, 'b c -> b c () ()')
         x = self.initial_conv(x)
         x = F.normalize(x, dim=1)
@@ -145,6 +146,8 @@ class BendedGenerator(nn.Module):
             #      'bending:', i == self.bending_idx)
             if bend and i == self.bending_idx and self.bending_module is not None:
                 bend_in = x
+                if perm_h is not None:
+                    x = x[:, :, perm_h, :]
                 x = self.bending_module(x)
                 bend_out = x
             
