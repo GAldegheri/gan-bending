@@ -12,6 +12,17 @@ def generate_image(model, bend=True):
         # ims is [BxWxHxC] call Image.fromarray(ims[0])
   return Image.fromarray(ims[0])
 
+def generate_image_from_seed(model, bend=True, seed=0):
+  model = model.to('cpu')
+  torch.manual_seed(seed)
+  with torch.no_grad():
+        ims = model(torch.randn(1, model.latent_dim),
+                    bend=bend)
+        ims = ims.permute(0,2,3,1).clamp_(0., 1.)  * 255.
+        ims = ims.detach().numpy().astype(np.uint8)
+        # ims is [BxWxHxC] call Image.fromarray(ims[0])
+  return Image.fromarray(ims[0])
+
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows*cols
 
